@@ -1,0 +1,35 @@
+--- a/audio/hal/audio_hw.cpp
++++ b/audio/hal/audio_hw.cpp
+@@ -16,6 +16,7 @@
+ #include <time.h>
+ #include <unistd.h>
+ 
++#include <cutils/properties.h>
+ #include <log/log.h>
+ 
+ #include <hardware/audio.h>
+@@ -96,7 +97,23 @@
+  * voice recognition one has no gain or noise reduction stage.
+  */
+ static audio_source_t remap_input_source(audio_source_t source) {
+-    return source == AUDIO_SOURCE_MIC ? AUDIO_SOURCE_VOICE_COMMUNICATION : source;
++    if (source != AUDIO_SOURCE_MIC) return source;
++    /*
++     * persist.vendor.audio.mic_remap selects the pipeline plain mic captures use:
++     *   "voip" (default): voice communication, as before this change;
++     *   "vr":   voice recognition, Amazon's ASR pipeline (beamforming + echo cancellation);
++     *   "none": no remap, plain mic without Amazon's processing.
++     * With "voip", an app that keeps the mic open (a voice satellite) gets no playback at all:
++     * the speaker pipeline waits to sync with an echo reference that only fills once the
++     * speaker plays. "vr" syncs and plays.
++     */
++    char v[PROPERTY_VALUE_MAX];
++    property_get("persist.vendor.audio.mic_remap", v, "voip");
++    audio_source_t out = AUDIO_SOURCE_VOICE_COMMUNICATION;
++    if (!strcmp(v, "vr")) out = AUDIO_SOURCE_VOICE_RECOGNITION;
++    else if (!strcmp(v, "none")) out = source;
++    ALOGI("mic_remap=%s: input source %d -> %d", v, source, out);
++    return out;
+ }
+ 
+ static int adev_set_parameters(struct audio_hw_device* dev, const char* kvpairs) {
